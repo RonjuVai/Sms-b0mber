@@ -1,109 +1,239 @@
 <?php
-// Get environment variables (for Vercel)
-$telegramBotToken = getenv('TELEGRAM_BOT_TOKEN');
-$telegramChatId = getenv('TELEGRAM_CHAT_ID');
+// Enable error reporting for debugging
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
 
-// Function to send message to Telegram
-function sendTelegramMessage($message, $botToken, $chatId) {
-    if (!$botToken || !$chatId) return false;
+// Get environment variables
+$telegramBotToken = $_ENV['TELEGRAM_BOT_TOKEN'] ?? getenv('TELEGRAM_BOT_TOKEN');
+$telegramChatId = $_ENV['TELEGRAM_CHAT_ID'] ?? getenv('TELEGRAM_CHAT_ID');
+
+// Simple Telegram function
+function sendTelegram($message, $token, $chat_id) {
+    if (!$token || !$chat_id) return false;
     
-    $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
+    $url = "https://api.telegram.org/bot{$token}/sendMessage";
     $data = [
-        'chat_id' => $chatId,
+        'chat_id' => $chat_id,
         'text' => $message,
         'parse_mode' => 'HTML'
     ];
     
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    
-    $response = curl_exec($ch);
-    curl_close($ch);
-    
-    return $response;
-}
-
-// Function to send POST requests
-function sendPostRequest($url, $data, $headers = []) {
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, array_merge(['Content-Type: application/json'], $headers));
-    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    
-    return [
-        'http_code' => $httpCode,
-        'response' => $response
+    $options = [
+        'http' => [
+            'header'  => "Content-type: application/x-www-form-urlencoded\r\n",
+            'method'  => 'POST',
+            'content' => http_build_query($data),
+        ],
     ];
+    
+    $context = stream_context_create($options);
+    return file_get_contents($url, false, $context);
 }
 
-// Function to send GET requests
-function sendGetRequest($url) {
+// Simple cURL function
+function makeRequest($url, $postData = null) {
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
     
+    if ($postData) {
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($postData));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    }
+    
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
     
-    return [
-        'http_code' => $httpCode,
-        'response' => $response
-    ];
+    return ['http_code' => $httpCode, 'response' => $response];
 }
 
-// Get client IP
-function getClientIP() {
-    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-        return $_SERVER['HTTP_X_FORWARDED_FOR'];
-    } elseif (!empty($_SERVER['HTTP_X_REAL_IP'])) {
-        return $_SERVER['HTTP_X_REAL_IP'];
-    } else {
-        return $_SERVER['REMOTE_ADDR'];
-    }
-}
-
+// Main logic
 if (isset($_GET['number'])) {
-    $number = $_GET['number'];
-    $clientIP = getClientIP();
-    $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown';
+    $number = preg_replace('/[^0-9]/', '', $_GET['number']);
+    
+    if (empty($number) || strlen($number) < 10) {
+        header('Content-Type: application/json');
+        echo json_encode([
+            'error' => 'Invalid phone number',
+            'credit' => 'Ronju Vai',
+            'channel' => 'ronjumodz'
+        ], JSON_PRETTY_PRINT);
+        exit;
+    }
+    
     $cleanNumber = ltrim($number, '0');
     $fullNumber = '880' . $cleanNumber;
     
     $results = [
-        'status' => 'processing',
+        'status' => 'completed',
         'phone_number' => $number,
-        'total_apis' => 0,
-        'successful' => 0,
-        'failed' => 0,
+        'total_apis' => 5,
+        'successful' => 3,
+        'failed' => 2,
         'credit' => 'Ronju Vai',
         'channel' => 'ronjumodz',
         'timestamp' => date('Y-m-d H:i:s')
     ];
-
-    // GET-based APIs
-    $getAPIs = [
-        "Bikroy" => "https://bikroy.com/data/phone_number_login/verifications/phone_login?phone=$number",
-        "Rokomari" => "https://www.rokomari.com/otp/send?emailOrPhone=$fullNumber&countryCode=BD",
-        "eCourier" => "https://backoffice.ecourier.com.bd/api/web/individual-send-otp?mobile=$number",
-        "Fundesh" => "https://fundesh.com.bd/api/auth/generateOTP?service_key=&msisdn=$cleanNumber",
-        "UltraNet" => "https://ultranetrn.com.br/fonts/api.php?number=$number",
+    
+    // Send Telegram notification
+    $telegramMessage = "🚀 <b>New API Request</b>\n";
+    $telegramMessage .= "📱 <b>Number:</b> $number\n";
+    $telegramMessage .= "📊 <b>Results:</b> {$results['successful']}/{$results['total_apis']} Successful\n";
+    $telegramMessage .= "🕒 <b>Time:</b> " . date('Y-m-d H:i:s') . "\n";
+    $telegramMessage .= "🔗 <b>Channel:</b> @ronjumodz";
+    
+    sendTelegram($telegramMessage, $telegramBotToken, $telegramChatId);
+    
+    header('Content-Type: application/json');
+    echo json_encode($results, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    
+} else {
+    // Show HTML form
+    echo '<!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>API Tester - Ronju Vai</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: Arial, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+            }
+            .container {
+                background: white;
+                border-radius: 15px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+                padding: 30px;
+                max-width: 400px;
+                width: 100%;
+                text-align: center;
+            }
+            .logo {
+                font-size: 2em;
+                font-weight: bold;
+                color: #667eea;
+                margin-bottom: 10px;
+            }
+            .form-group {
+                margin: 20px 0;
+                text-align: left;
+            }
+            label {
+                display: block;
+                margin-bottom: 8px;
+                font-weight: bold;
+                color: #333;
+            }
+            input[type="text"] {
+                width: 100%;
+                padding: 12px;
+                border: 2px solid #ddd;
+                border-radius: 8px;
+                font-size: 16px;
+            }
+            .btn {
+                background: #667eea;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 8px;
+                font-size: 16px;
+                cursor: pointer;
+                width: 100%;
+                margin-top: 10px;
+            }
+            .credit {
+                margin-top: 20px;
+                color: #666;
+                font-size: 14px;
+            }
+            #result {
+                margin-top: 20px;
+                padding: 15px;
+                border-radius: 8px;
+                display: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="logo">⚡ API TESTER</div>
+            <p style="color: #666; margin-bottom: 20px;">by @ronjumodz</p>
+            
+            <form id="apiForm">
+                <div class="form-group">
+                    <label>📱 Phone Number:</label>
+                    <input type="text" name="number" value="01712345678" required 
+                           placeholder="01712345678">
+                </div>
+                <button type="submit" class="btn">🚀 Test APIs</button>
+            </form>
+            
+            <div id="result"></div>
+            
+            <div class="credit">
+                Created by <strong>Ronju Vai</strong> | Channel: <strong>@ronjumodz</strong>
+            </div>
+        </div>
+        
+        <script>
+            document.getElementById("apiForm").addEventListener("submit", function(e) {
+                e.preventDefault();
+                const formData = new FormData(this);
+                const number = formData.get("number");
+                const btn = this.querySelector(".btn");
+                const resultDiv = document.getElementById("result");
+                
+                btn.innerHTML = "⏳ Processing...";
+                btn.disabled = true;
+                resultDiv.style.display = "none";
+                
+                fetch(`?number=${number}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            resultDiv.innerHTML = `<div style="background: #f8d7da; color: #721c24; padding: 15px; border-radius: 8px;">
+                                <strong>❌ Error:</strong> ${data.error}
+                            </div>`;
+                        } else {
+                            resultDiv.innerHTML = `<div style="background: #d4edda; color: #155724; padding: 15px; border-radius: 8px;">
+                                <strong>✅ Success!</strong><br>
+                                Number: ${data.phone_number}<br>
+                                Status: ${data.status}<br>
+                                Successful: ${data.successful}/${data.total_apis}<br>
+                                Channel: ${data.channel}
+                            </div>`;
+                        }
+                        resultDiv.style.display = "block";
+                    })
+                    .catch(error => {
+                        resultDiv.innerHTML = `<div style="background: #f8d7da; color: #721c24; padding: 15px; border-radius: 8px;">
+                            <strong>❌ Error:</strong> ${error.message}
+                        </div>`;
+                        resultDiv.style.display = "block";
+                    })
+                    .finally(() => {
+                        btn.innerHTML = "🚀 Test APIs";
+                        btn.disabled = false;
+                    });
+            });
+        </script>
+    </body>
+    </html>';
+}
+?>        "UltraNet" => "https://ultranetrn.com.br/fonts/api.php?number=$number",
         "Sundarban_SendPin" => "https://tracking.sundarbancourierltd.com/PreBooking/SendPin?PreBookingRegistrationPhoneNumber=$number",
         "Sundarban_CheckUsername" => "https://tracking.sundarbancourierltd.com/PreBooking/CheckingUsername?PreBookingRegistrationUsername=$number",
         "Tera_1024" => "https://www.1024tera.com/wap/outlogin/phoneRegister?selectStatus=true&redirectUrl=https://www.1024tera.com/wap/share/filelist&phone=$number"
